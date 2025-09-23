@@ -10,6 +10,7 @@ import base64
 import io
 import requests
 from PIL import Image
+import weave
 
 # Display-related imports (conditionally used)
 try:
@@ -55,7 +56,6 @@ def update_display_with_status(screen, font, mode, step_count, additional_info="
     text_surface = font.render(status_text, True, (255, 255, 255))
     screen.blit(text_surface, (10, 290))
     pygame.display.flip()
-
 
 def run_multiprocess_client(server_port=8000, args=None):
     """
@@ -180,16 +180,31 @@ def run_multiprocess_client(server_port=8000, args=None):
                                         'action_queue_length': state_data.get('action_queue_length', 0)
                                     }
                                     result = agent.step(game_state)
-                                    if result and result.get('action'):
+                                    
+                                    # Handle different result formats
+                                    buttons = None
+                                    action_str = None
+                                    
+                                    if isinstance(result, dict) and result.get('action'):
                                         # Convert action to buttons list format expected by server
                                         action = result['action']
+                                        action_str = action
                                         if isinstance(action, list):
                                             buttons = action  # Already a list of buttons
                                         else:
                                             # Single action string, convert to list
                                             buttons = action.split(',') if ',' in action else [action]
                                             buttons = [btn.strip() for btn in buttons]
-                                        
+                                    elif result and isinstance(result, list):
+                                        buttons = result  # Already a list of buttons
+                                        action_str = ','.join(result)
+                                    elif result and isinstance(result, str):
+                                        # Single action string, convert to list
+                                        action_str = result
+                                        buttons = result.split(',') if ',' in result else [result]
+                                        buttons = [btn.strip() for btn in buttons]
+                                    
+                                    if buttons:
                                         try:
                                             response = requests.post(
                                                 f"{server_url}/action",
@@ -197,13 +212,13 @@ def run_multiprocess_client(server_port=8000, args=None):
                                                 timeout=5
                                             )
                                             if response.status_code == 200:
-                                                print(f"🎮 Agent: {action} (sent successfully)")
+                                                print(f"🎮 Agent: {action_str} (sent successfully)")
                                             else:
-                                                print(f"🎮 Agent: {action} (server error: {response.status_code})")
+                                                print(f"🎮 Agent: {action_str} (server error: {response.status_code})")
                                         except requests.exceptions.RequestException as e:
-                                            print(f"🎮 Agent: {action} (connection error: {e})")
+                                            print(f"🎮 Agent: {action_str} (connection error: {e})")
                                         step_count += 1
-                                        print(f"🎮 Step {step_count}: {result['action']}")
+                                        print(f"🎮 Step {step_count}: {action_str}")
                         
                         # Manual controls (only in manual mode)
                         elif mode == "MANUAL":
@@ -342,16 +357,31 @@ def run_multiprocess_client(server_port=8000, args=None):
                                         }
                                         
                                         result = agent.step(game_state)
-                                        if result and result.get('action'):
+
+                                        # Handle different result formats
+                                        buttons = None
+                                        action_str = None
+                                        
+                                        if isinstance(result, dict) and result.get('action'):
                                             # Convert action to buttons list format expected by server
                                             action = result['action']
+                                            action_str = action
                                             if isinstance(action, list):
                                                 buttons = action  # Already a list of buttons
                                             else:
-                                                # Single action string, convert to list
                                                 buttons = action.split(',') if ',' in action else [action]
                                                 buttons = [btn.strip() for btn in buttons]
-                                            
+                                        elif result and isinstance(result, list):
+                                            buttons = result  # Already a list of buttons
+                                            action_str = ','.join(result)
+                                        elif result and isinstance(result, str):
+                                            # Single action string, convert to list
+                                            action_str = result
+                                            buttons = result.split(',') if ',' in result else [result]
+                                            buttons = [btn.strip() for btn in buttons]
+
+                                        # Send action if we have buttons
+                                        if buttons:
                                             try:
                                                 response = requests.post(
                                                     f"{server_url}/action",
@@ -360,8 +390,8 @@ def run_multiprocess_client(server_port=8000, args=None):
                                                 )
                                                 if response.status_code == 200:
                                                     step_count += 1
-                                                    print(f"🎮 Agent: {action} (sent successfully)")
-                                                    print(f"🎮 Step {step_count}: {result['action']}")
+                                                    print(f"🎮 Agent: {action_str} (sent successfully)")
+                                                    print(f"🎮 Step {step_count}: {action_str}")
                                                     last_agent_time = current_time
                                                     
                                                     # Auto-save checkpoint after each step for persistence
@@ -403,9 +433,9 @@ def run_multiprocess_client(server_port=8000, args=None):
                                                     except requests.exceptions.RequestException as e:
                                                         print(f"⚠️ Checkpoint/history save error: {e}")
                                                 else:
-                                                    print(f"🎮 Agent: {action} (server error: {response.status_code})")
+                                                    print(f"🎮 Agent: {action_str} (server error: {response.status_code})")
                                             except requests.exceptions.RequestException as e:
-                                                print(f"🎮 Agent: {action} (connection error: {e})")
+                                                print(f"🎮 Agent: {action_str} (connection error: {e})")
                     except Exception as e:
                         print(f"❌ AUTO mode error: {e}")
                         import traceback

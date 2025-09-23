@@ -506,7 +506,7 @@ class VertexBackend(VLMBackend):
         # Initialize the model
         self.client = genai.Client(
             vertexai=True,
-            project='pokeagent-011',
+            project='pokeagent-009',
             location='us-central1',
         )
         self.genai = genai

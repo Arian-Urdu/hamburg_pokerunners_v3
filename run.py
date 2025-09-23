@@ -10,11 +10,17 @@ import time
 import argparse
 import subprocess
 import signal
+import weave
+from datetime import datetime
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from server.client import run_multiprocess_client
 
+# WandB weave
+weave.init(
+        project_name="pokeagent-challenge-llm"
+    )
 
 def start_server(args):
     """Start the server process with appropriate arguments"""
@@ -83,6 +89,7 @@ def start_frame_server():
         return None
 
 
+@weave.op(name=f"agent_baseline_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}")
 def main():
     """Main entry point for the Pokemon Agent"""
     parser = argparse.ArgumentParser(description="Pokemon Emerald AI Agent")

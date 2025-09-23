@@ -664,7 +664,7 @@ Context: {context} | Coords: {coords} """
             print("="*120)
             
             # Print prompt in chunks to avoid terminal truncation
-            sys.stdout.write(prompt)
+            # sys.stdout.write(prompt)
             sys.stdout.write("\n")
             sys.stdout.flush()
             

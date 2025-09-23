@@ -1,5 +1,6 @@
 import logging
 from collections import deque
+import weave
 from agent.system_prompt import system_prompt
 from utils.state_formatter import format_state_summary, get_party_health_summary
 from utils.vlm import VLM
@@ -54,7 +55,8 @@ def extract_key_state_info(state_data):
     
     return key_info
 
-def memory_step(memory_context, current_plan, recent_actions, observation_buffer, vlm):
+@weave.op()
+def memory_step(memory_context, current_plan, recent_actions, observation_buffer,):
     """
     Maintain a rolling buffer of the previous 50 actions and observations with state information.
     Returns updated memory_context with the most recent 50 entries and key insights.
@@ -137,16 +139,23 @@ def memory_step(memory_context, current_plan, recent_actions, observation_buffer
         current_state_summary = latest_state.get('state_summary', 'No state data')
     
     # Combine into comprehensive memory context
-    memory_context = f"""★★★ COMPREHENSIVE MEMORY CONTEXT ★★★
+    memory_context = f"""
+<current_state>
+{current_state_summary}
+</current_state>
 
-CURRENT STATE: {current_state_summary}
+<current_plan>
+{current_plan if current_plan else 'No plan yet'}
+</current_plan>
 
-CURRENT PLAN: {current_plan if current_plan else 'No plan yet'}
+<key_events>
+{' -> '.join(key_events[-5:]) if key_events else 'None recently'}
+</key_events>
 
-KEY EVENTS: {' -> '.join(key_events[-5:]) if key_events else 'None recently'}
-
-RECENT MEMORY (last 50 entries):
-{chr(10).join(memory_entries[-30:])}"""  # Show last 30 entries to avoid too much text
+RECENT MEMORY (last 30 entries):
+<recent_memory>
+{chr(10).join(memory_entries[-30:])}
+</recent_memory>"""  # Show last 30 entries to avoid too much text
     
     logger.info(f"[MEMORY] Memory context updated with {len(memory_entries)} total entries")
     logger.info(f"[MEMORY] Current state: {current_state_summary}")

@@ -1,6 +1,7 @@
 import logging
 import random
 import sys
+import weave
 from agent.system_prompt import system_prompt
 from utils.state_formatter import format_state_for_llm, format_state_summary, get_movement_options, get_party_health_summary
 from utils.vlm import VLM
@@ -8,7 +9,8 @@ from utils.vlm import VLM
 # Set up module logging
 logger = logging.getLogger(__name__)
 
-def action_step(memory_context, current_plan, latest_observation, frame, state_data, recent_actions, vlm):
+@weave.op()
+def action_step(memory_context, current_plan, latest_observation, state_data, recent_actions, vlm):
     """
     Decide and perform the next action button(s) based on memory, plan, observation, and comprehensive state.
     Returns a list of action buttons as strings.
@@ -62,86 +64,126 @@ def action_step(memory_context, current_plan, latest_observation, frame, state_d
     
     # Recent actions context
     if recent_actions:
-        action_context.append(f"Recent Actions: {', '.join(list(recent_actions)[-5:])}")
-    
+        # Ensure all recent actions are strings before joining
+        recent_actions_str = [str(action) for action in recent_actions[-5:]]
+        action_context.append(f"Recent Actions: {', '.join(recent_actions_str)}")
+
     context_str = "\n".join(action_context)
     
-    action_prompt = f"""
-    ★★★ COMPREHENSIVE GAME STATE DATA ★★★
+    action_prompt = f"""ACTION DECISION TASK
+You are the agent playing Pokemon Emerald with a speedrunning mindset. Make quick, efficient decisions.
     
+You will be provided with the following information:
+<context>
+    <game_state>
     {state_context}
-    
-    ★★★ ENHANCED ACTION CONTEXT ★★★
-    
+    </game_state>
+
+    <action_context>
     {context_str}
+    </action_context>
+
+    <memory_context>
+    {memory_context}
+    </memory_context>
+
+    <current_plan>
+    {current_plan if current_plan else 'No plan yet'}
+    </current_plan>
+
+    <latest_observation>
+    {latest_observation}
+    </latest_observation>
+</context>
+
+Based on the comprehensive state information above, decide your next action(s):
     
-    ★★★ ACTION DECISION TASK ★★★
+BATTLE STRATEGY:
+- If in battle: Choose moves strategically based on type effectiveness and damage
+- Consider switching pokemon if current one is weak/low HP
+- Use items if pokemon is in critical condition
     
-    You are the agent playing Pokemon Emerald with a speedrunning mindset. Make quick, efficient decisions.
+NAVIGATION STRATEGY:
+- Use movement options analysis above for efficient navigation
+- Avoid blocked tiles (marked as BLOCKED)
+- Consider tall grass: avoid if party is weak, seek if need to train/catch
+- Navigate around water unless you have Surf
+- Use coordinates to track progress toward objectives
     
-    Memory Context: {memory_context}
-    Current Plan: {current_plan if current_plan else 'No plan yet'}
-    Latest Observation: {latest_observation}
+MENU/DIALOGUE STRATEGY:
+- If in dialogue: A to advance text, B to cancel/skip if possible
+- If in menu: Navigate with UP/DOWN/LEFT/RIGHT, A to select, B to cancel/back out
+- If stuck in menu/interface: B repeatedly to exit to overworld
+- In Pokemon Center: A to talk to Nurse Joy, A to confirm healing
     
-    Based on the comprehensive state information above, decide your next action(s):
+HEALTH MANAGEMENT:
+- If pokemon are low HP/fainted, head to Pokemon Center
+- If no healthy pokemon, prioritize healing immediately
+- Consider terrain: avoid wild encounters if party is weak
     
-    BATTLE STRATEGY:
-    - If in battle: Choose moves strategically based on type effectiveness and damage
-    - Consider switching pokemon if current one is weak/low HP
-    - Use items if pokemon is in critical condition
+EFFICIENCY RULES:
+1. Output sequences of actions when you know what's coming (e.g., "RIGHT, RIGHT, RIGHT, A" to enter a door)
+2. For movement: repeat directions based on movement options (e.g., "UP, UP, UP, UP" if UP shows "Normal path")
+3. If uncertain, output single action and reassess
+4. Use traversability data: move toward open paths, avoid obstacles
+
+In the overworld focus on using directions to navigate efficiently.
     
-    NAVIGATION STRATEGY:
-    - Use movement options analysis above for efficient navigation
-    - Avoid blocked tiles (marked as BLOCKED)
-    - Consider tall grass: avoid if party is weak, seek if need to train/catch
-    - Navigate around water unless you have Surf
-    - Use coordinates to track progress toward objectives
+Valid buttons: A, B, UP, DOWN, LEFT, RIGHT, START
+- A: Interact with NPCs/objects, confirm selections, advance dialogue, use moves in battle
+- B: Cancel menus, back out of interfaces, flee from battle
+- UP/DOWN/LEFT/RIGHT: Move character, navigate menus (also in battles), select options
+- START: Open main menu (Title sequence, Pokedex, Pokemon, Bag, etc.)
+
+MOST IMPORTANT: look at IMMEDIATE NEXT GOAL in the plan and try to achieve it with specific actions.
+
+⚠️ CRITICAL WARNING: NEVER save the game using the in-game save menu! Saving will crash the entire run and end your progress. If you encounter a save prompt in the game, press B to cancel it immediately!
     
-    MENU/DIALOGUE STRATEGY:
-    - If in dialogue: A to advance text, B to cancel/skip if possible
-    - If in menu: Navigate with UP/DOWN/LEFT/RIGHT, A to select, B to cancel/back out
-    - If stuck in menu/interface: B repeatedly to exit to overworld
-    - In Pokemon Center: A to talk to Nurse Joy, A to confirm healing
-    
-    HEALTH MANAGEMENT:
-    - If pokemon are low HP/fainted, head to Pokemon Center
-    - If no healthy pokemon, prioritize healing immediately
-    - Consider terrain: avoid wild encounters if party is weak
-    
-    EFFICIENCY RULES:
-    1. Output sequences of actions when you know what's coming (e.g., "RIGHT, RIGHT, RIGHT, A" to enter a door)
-    2. For dialogue: "A, A, A, A, A" to mash through
-    3. For movement: repeat directions based on movement options (e.g., "UP, UP, UP, UP" if UP shows "Normal path")
-    4. If uncertain, output single action and reassess
-    5. Use traversability data: move toward open paths, avoid obstacles
-    6. If movement doesn't change coordinates (e.g., RIGHT but X doesn't increase), check map for walls (#) blocking your path
-    
-    Valid buttons: A, B, SELECT, START, UP, DOWN, LEFT, RIGHT, L, R
-    - A: Interact with NPCs/objects, confirm selections, advance dialogue, use moves in battle
-    - B: Cancel menus, back out of interfaces, run faster (with running shoes), flee from battle
-    - START: Open main menu (Title sequence, Pokedex, Pokemon, Bag, etc.)
-    - SELECT: Use registered key item (typically unused)
-    - UP/DOWN/LEFT/RIGHT: Move character, navigate menus, select options
-    - L/R: Cycle through pages in some menus, switch Pokemon in battle (rare usage)
-    
-    ⚠️ CRITICAL WARNING: NEVER save the game using the in-game save menu! Saving will crash the entire run and end your progress. If you encounter a save prompt in the game, press B to cancel it immediately!
-    
-    Return ONLY the button name(s) as a comma-separated list, nothing else.
-    Maximum 10 actions in sequence. Avoid repeating same button more than 6 times.
-    """
+Output: 
+1. Should be your EXTREMELY DETAILED STEP-BY-STEP  reasoning of how to achieve the IMMEDIATE NEXT GOAL stated in the Plan. In <REASONING> </REASONING> tags.
+2. Should include specific actions to take based on the current game state and objectives. In <ACTIONS> </ACTIONS> tags  Return ONLY the button name(s) as a comma-separated list, nothing else. Maximum 5 actions in sequence.
+
+Example output:
+<REASONING> To achieve the immediate next goal of entering the building, I will move RIGHT until I reach the door, then press A to enter. </REASONING>
+<ACTIONS> RIGHT, RIGHT, RIGHT, A </ACTIONS>
+
+When traversing give multiple movement commands in sequence to move efficiently.
+REMEMBER MOST IMPORTANT OF ALL: ACTIONS MUST BE IN <ACTIONS> </ACTIONS> TAGS AND VALID BUTTONS ONLY: A, B, UP, DOWN, LEFT, RIGHT, START"""
     
     # Construct complete prompt for VLM
     complete_prompt = system_prompt + action_prompt
     
     action_response = vlm.get_text_query(complete_prompt, "ACTION").strip().upper()
-    valid_buttons = ['A', 'B', 'SELECT', 'START', 'UP', 'DOWN', 'LEFT', 'RIGHT', 'L', 'R']
+    valid_buttons = ['A', 'B', 'START', 'UP', 'DOWN', 'LEFT', 'RIGHT']
     
-    # Split the response by commas and clean up
-    actions = [btn.strip() for btn in action_response.split(',') if btn.strip() in valid_buttons]
+    # Print VLM response for debugging
+    print("🤖 VLM RESPONSE:")
+    print(f"Raw response: '{action_response}'")
+    
+    # Parse actions from between <ACTIONS> and </ACTIONS> tags
+    actions = []
+    try:
+        # Find the content between <ACTIONS> and </ACTIONS> tags
+        start_tag = "<ACTIONS>"
+        end_tag = "</ACTIONS>"
+        start_idx = action_response.find(start_tag)
+        end_idx = action_response.find(end_tag)
+        
+        if start_idx != -1 and end_idx != -1:
+            actions_content = action_response[start_idx + len(start_tag):end_idx].strip()
+            # Split by commas and clean up
+            actions = [btn.strip().upper() for btn in actions_content.split(',') if btn.strip().upper() in valid_buttons]
+        else:
+            # Fallback: try to parse the entire response as comma-separated actions
+            actions = [btn.strip().upper() for btn in action_response.split(',') if btn.strip().upper() in valid_buttons]
+    except Exception as e:
+        logger.warning(f"[ACTION] Error parsing actions: {e}")
+        # Fallback: try to parse the entire response as comma-separated actions
+        actions = [btn.strip().upper() for btn in action_response.split(',') if btn.strip().upper() in valid_buttons]
     
     print(f"Parsed actions: {actions}")
     if len(actions) == 0:
-        print("❌ No valid actions parsed - using default 'A'")
+        print("❌ No valid actions parsed - using default 'B'")
     print("-" * 80 + "\n")
     
     # Limit to maximum 10 actions and prevent excessive repetition
@@ -150,11 +192,13 @@ def action_step(memory_context, current_plan, latest_observation, frame, state_d
     # If no valid actions found, make intelligent default based on state
     if not actions:
         if game_data.get('in_battle', False):
-            actions = ['A']  # Attack in battle
+            actions = ['B']  # Attack in battle
         elif party_health['total_count'] == 0:
             actions = ['A', 'A', 'A']  # Try to progress dialogue/menu
         else:
-            actions = [random.choice(['A', 'RIGHT', 'UP', 'DOWN', 'LEFT'])]  # Random exploration
+            actions = [random.choice(['B'])]  # Random exploration
     
     logger.info(f"[ACTION] Actions decided: {', '.join(actions)}")
-    return actions 
+
+    # return raw action_response for logging in wandb weave
+    return actions, action_response 
